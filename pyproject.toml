@@ -1,0 +1,9 @@
+[project]
+name = "robust-char-lm"
+version = "0.1.0"
+description = "Simple project for training a robust character-level language model."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.11.0",
+]
