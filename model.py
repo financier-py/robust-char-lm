@@ -2,8 +2,8 @@
 
 import torch
 import torch.nn as nn
-
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from config import config
 
@@ -114,11 +114,23 @@ class RobustLM(nn.Module):
         self.classificator = nn.Linear(config.lstm_hidden * 2, word_vocab_size)
 
     def forward(self, x: torch.Tensor):
+
+        seq_lengths = (x.sum(dim=-1) > 0).sum(dim=-1).cpu().clamp(min=1)
+
         embed = self.char_cnn(x)
         embed = self.highway(embed)
         embed = self.dropout(embed)
 
-        lstm_out, _ = self.lstm(embed)
+        packed_embed = pack_padded_sequence(
+            embed, seq_lengths, batch_first=True, enforce_sorted=False
+        )
+
+        packed_lstm_out, _ = self.lstm(packed_embed)
+
+
+        lstm_out, _ = pad_packed_sequence(
+            packed_lstm_out, batch_first=True, total_length=x.size(1)
+        )
 
         logits = self.classificator(self.dropout(lstm_out))
         return logits
