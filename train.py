@@ -89,8 +89,11 @@ def train():
 
         model.eval()
         val_loss = 0.0
-        correct_preds = 0
-        total_preds = 0
+
+        correct_fixes = 0
+        total_noisy = 0
+        wrong_changes = 0
+        total_clean = 0
 
         val_pbar = tqdm(
             val_loader, desc=f"Epoch {epoch}/{config.epochs} [Val]", leave=False
@@ -112,28 +115,45 @@ def train():
 
                 preds = torch.argmax(logits_flat, dim=1)
 
-                mask = (y_flat != 0) & (y_flat != 1) & is_noisy_flat
-                if mask.sum() > 0:
-                    correct_preds += (preds[mask] == y_flat[mask]).sum ().item()
-                    total_preds += mask.sum().item()
+                # тут убираем падинг и неизв. слова
+                valid_mask = (y_flat != 0) & (y_flat != 1)
+                
+                # маска для слов где была опечятка
+                mask_noisy = valid_mask & is_noisy_flat
+
+                # маска для изнач. чистых
+                mask_clean = valid_mask & ~is_noisy_flat
+
+                # True positive, сколько опечаток исправили
+                if mask_noisy.sum() > 0:
+                    correct_fixes += (preds[mask_noisy] == y_flat[mask_noisy]).sum().item()
+                    total_noisy += mask_noisy.sum().item()
+                
+                # False positive, сколько слов испортили
+                if mask_clean.sum() > 0:
+                    wrong_changes += (preds[mask_clean] != y_flat[mask_clean]).sum().item()
+                    total_clean += mask_clean.sum().item()
 
         avg_val_loss = val_loss / len(val_loader)
-        val_accuracy = correct_preds / total_preds if total_preds > 0 else 0
+
+        fix_accuracy = correct_fixes / total_noisy if total_noisy > 0 else 0
+        break_rate = wrong_changes / total_clean if total_clean > 0 else 0
 
         scheduler.step(avg_val_loss)
 
         print(
-            f"Эпоха {epoch} Итог: "
-            f"Train Loss: {avg_train_loss:.4f} | "
-            f"Val Loss: {avg_val_loss:.4f} | "
-            f"Val Acc: {val_accuracy:.4f}"
+            f"Эпоха {epoch} | "
+            f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | "
+            f"Успешные исправления: {fix_accuracy:.2%} | "
+            f"Испорчено слов: {break_rate:.2%}"
         )
 
         wandb.log({
             "epoch": epoch,
             "train_loss": avg_train_loss,
             "val_loss": avg_val_loss,
-            "val_accuracy": val_accuracy,
+            "nice_fixes": fix_accuracy,
+            "spoiled words": break_rate,
             "lr": optimizer.param_groups[0]['lr']
         })
 
