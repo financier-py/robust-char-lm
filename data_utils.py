@@ -9,17 +9,31 @@ from config import config
 
 
 def clean_text(text: str) -> str:
-    text = text.lower() # пока что так, так как убрал знаки препинания
- 
-    text = re.sub(r"==.*?==", "", text) # тут убираем заголовки wiki
-    text = re.sub(r'\d+', '0', text) # заменяем все числа на один токен 0
+    text = text.lower()  # пока что так, так как убрал знаки препинания
 
-    text = re.sub(r'\.', ' . ', text) # делаем точку отдельным токеном
-    
-    text = re.sub(r'[^а-яА-ЯёЁ0\. ]', " ", text) # все кроме букв, 0 и точки убираем
-    
+    text = re.sub(r"==.*?==", "", text)  # тут убираем заголовки wiki
+    text = re.sub(r"\d+", "0", text)  # заменяем все числа на один токен 0
+
+    text = re.sub(r"\.", " . ", text)  # делаем точку отдельным токеном
+
+    text = re.sub(r"[^а-яА-ЯёЁ0\. ]", " ", text)  # все кроме букв, 0 и точки убираем
+
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def chunk_examples(batch):
+    chunks = []
+    for text in batch["text"]:
+        cleaned = clean_text(text)
+        words = cleaned.split()
+
+        for i in range(0, len(words), config.max_seq_len):
+            chunk = words[i : i + config.max_seq_len]
+            if len(chunk) >= 10:
+                chunks.append(" ".join(chunk))
+
+    return {"text": chunks}
 
 
 def prepare_dataloaders(
@@ -29,12 +43,11 @@ def prepare_dataloaders(
         "wikimedia/wikipedia", "20231101.ru", split=f"train[:{limit}]"
     )
 
-    full_ds = full_ds.filter(
-        lambda x: len(x["text"]) > 300, num_proc=num_workers
-    )
+    full_ds = full_ds.filter(lambda x: len(x["text"]) > 300, num_proc=num_workers)
     full_ds = full_ds.map(
-        lambda batch: {"text": [clean_text(t) for t in batch["text"]]},
+        chunk_examples,
         batched=True,
+        remove_columns=full_ds.column_names,
         num_proc=num_workers,
     )
 
@@ -60,7 +73,7 @@ def prepare_dataloaders(
         shuffle=True,
         num_workers=num_workers,
         drop_last=True,
-        pin_memory=True
+        pin_memory=True,
     )
 
     val_loader = DataLoader(
@@ -69,7 +82,7 @@ def prepare_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         drop_last=False,
-        pin_memory=True
+        pin_memory=True,
     )
 
     print(f"Dataset split: Train={len(train_ds)} docs, Val={len(val_ds)} docs")
