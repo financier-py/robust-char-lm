@@ -1,3 +1,5 @@
+# model.py
+
 import torch
 import torch.nn as nn
 
@@ -85,14 +87,14 @@ class HighWay(nn.Module):
 
     def forward(self, x: torch.Tensor):
         for k in range(self.num_layers):
-            new_x = F.relu(self.proj(x))
-            gate_w = torch.sigmoid(self.gate(x))
+            new_x = F.relu(self.proj[k](x))
+            gate_w = torch.sigmoid(self.gate[k](x))
 
             x = (gate_w * new_x) + ((1 - gate_w) * x)
         return x
 
 
-class RobustLm(nn.Module):
+class RobustLM(nn.Module):
     def __init__(self, char_vocab_size: int, word_vocab_size: int):
         super().__init__()
 
@@ -105,15 +107,18 @@ class RobustLm(nn.Module):
             num_layers=config.lstm_layers,
             batch_first=True,
             dropout=config.dropout if config.lstm_layers > 1 else 0,
+            bidirectional=True # новвоведение
         )
 
-        self.classificator = nn.Linear(config.lstm_hidden, word_vocab_size)
+        self.dropout = nn.Dropout(p=config.dropout)
+        self.classificator = nn.Linear(config.lstm_hidden * 2, word_vocab_size)
 
     def forward(self, x: torch.Tensor):
         embed = self.char_cnn(x)
         embed = self.highway(embed)
+        embed = self.dropout(embed)
 
         lstm_out, _ = self.lstm(embed)
 
-        logits = self.classificator(lstm_out)
+        logits = self.classificator(self.dropout(lstm_out))
         return logits

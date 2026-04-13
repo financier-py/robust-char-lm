@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# мои веса
+checkpoints/
+main.py
