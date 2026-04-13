@@ -10,12 +10,14 @@ from config import config
 
 def clean_text(text: str) -> str:
     text = text.lower() # пока что так, так как убрал знаки препинания
-    # тут убираем заголовки wiki
-    text = re.sub(r"==.*?==", "", text)
-    # заменяем все числа на один токен 0
-    text = re.sub(r'\d+', '0', text)
-    # все кроме букв и 0 убираем
-    text = re.sub(r'[^а-яА-ЯёЁ0 ]', " ", text)
+ 
+    text = re.sub(r"==.*?==", "", text) # тут убираем заголовки wiki
+    text = re.sub(r'\d+', '0', text) # заменяем все числа на один токен 0
+
+    text = re.sub(r'\.', ' . ', text) # делаем точку отдельным токеном
+    
+    text = re.sub(r'[^а-яА-ЯёЁ0\. ]', " ", text) # все кроме букв, 0 и точки убираем
+    
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
