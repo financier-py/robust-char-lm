@@ -14,6 +14,7 @@ class TextAugmenter:
         self.prob = prob
         self.chars = chars
         self.neighbors = config.neigbours
+        self.phonetic_rules = config.phonetic_rules
 
     def swap_chars(self, word: str):
         if len(word) < 2:
@@ -59,6 +60,24 @@ class TextAugmenter:
         else:
             j_char = j_char.lower()
         return word[:i] + j_char + word[i + 1 :]
+    
+    def apply_phonetic_error(self, word: str):
+        if len(word) < 2:
+            return word
+
+        possible_replacements = []
+        
+        for target, replacements in self.phonetic_rules.items():
+            if target in word:
+                for rep in replacements:
+                    possible_replacements.append((target, rep))
+
+        if not possible_replacements:
+            return word
+
+        target, replacement = random.choice(possible_replacements)
+
+        return word.replace(target, replacement, 1)
 
     def apply_noise(self, word: str):
         cur_prob = self.prob * (min(len(word), 10) / 5)
@@ -72,6 +91,8 @@ class TextAugmenter:
             self.insert_char,
             self.substitute_char,
             self.substitute_neighbor,
+            self.apply_phonetic_error,
+            self.apply_phonetic_error
         ]
 
         strategy = random.choice(strategies)
@@ -148,5 +169,5 @@ class RobustDataset(Dataset):
         return {
             "x": torch.stack(dirty_words_tensor),
             "y": torch.tensor(clean_words_ids, dtype=torch.long),
-            "is_noisy": torch.tensor(is_noisy, dtype=torch.bool)
+            "is_noisy": torch.tensor(is_noisy, dtype=torch.bool),
         }
