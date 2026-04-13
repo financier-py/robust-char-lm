@@ -9,10 +9,12 @@ from config import config
 
 
 def clean_text(text: str) -> str:
+    # тут убираем заголовки wiki
     text = re.sub(r"==.*?==", "", text)
-    text = re.sub(r'[^а-яА-ЯёЁ0-9 \.,!\?\-—:;()"]', " ", text)
-    # feat: избавляемся от знаков препинания сразу после слов
-    text = re.sub(r'([.,!\?\-—:;()"])', r' \1 ', text) 
+    # заменяем все числа на один токен 0
+    text = re.sub(r'\d+', '0', text)
+    # все кроме букв и 0 убираем
+    text = re.sub(r'[^а-яА-ЯёЁ0 ]', " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
