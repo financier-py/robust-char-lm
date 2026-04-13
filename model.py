@@ -127,7 +127,6 @@ class RobustLM(nn.Module):
 
         packed_lstm_out, _ = self.lstm(packed_embed)
 
-
         lstm_out, _ = pad_packed_sequence(
             packed_lstm_out, batch_first=True, total_length=x.size(1)
         )

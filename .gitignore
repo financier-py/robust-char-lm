@@ -1,3 +1,5 @@
+main.py
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -11,4 +13,3 @@ wheels/
 
 # мои веса
 checkpoints/
-main.py
