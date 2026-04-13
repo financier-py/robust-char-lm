@@ -9,6 +9,7 @@ from config import config
 
 
 def clean_text(text: str) -> str:
+    text = text.lower() # пока что так, так как убрал знаки препинания
     # тут убираем заголовки wiki
     text = re.sub(r"==.*?==", "", text)
     # заменяем все числа на один токен 0
