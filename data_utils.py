@@ -1,7 +1,8 @@
 # data_utils.py
 
 import re
-from datasets import load_dataset
+import json
+from datasets import load_dataset, concatenate_datasets
 from torch.utils.data import DataLoader
 
 from dataset import Vocab, TextAugmenter, RobustDataset
@@ -39,11 +40,64 @@ def chunk_examples(batch):
 def prepare_dataloaders(
     limit: int, batch_size: int, val_ratio: float = 0.1, num_workers: int = 2
 ):
-    full_ds = load_dataset(
+    print("Грузим вики")
+    wiki_ds = load_dataset(
         "wikimedia/wikipedia", "20231101.ru", split=f"train[:{limit}]"
     )
+    wiki_ds = wiki_ds.select_columns(["text"])
 
-    full_ds = full_ds.filter(lambda x: len(x["text"]) > 300, num_proc=num_workers)
+    print("Грузим либрусек книжечки")
+    lit_ds_raw = load_dataset(
+        "parquet",
+        data_files=[
+            "hf://datasets/averoo/librusec/data/train-00000-of-00049.parquet",
+            "hf://datasets/averoo/librusec/data/train-00001-of-00049.parquet",
+        ],
+        split="train",
+    )
+
+    lit_ds_raw = lit_ds_raw.select(range(min(limit // 8, len(lit_ds_raw))))
+    print("размер lit_ds_raw:", len(lit_ds_raw))
+
+    def extract_text(doc_json):
+        try:
+            doc = json.loads(doc_json)
+            res = []
+            for body in doc:
+                if "body_title" in body:
+                    res.append("\n".join(body["body_title"]))
+                if "sections" in body:
+                    # Итерируемся по массиву секций
+                    for section in body["sections"]:
+                        if "data" in section and "pars" in section["data"]:
+                            # Вытаскиваем длинные параграфы текста
+                            res.extend(
+                                [
+                                    p
+                                    for p in section["data"]["pars"]
+                                    if isinstance(p, str) and len(p) > 20
+                                ]
+                            )
+            return "\n".join(res)
+        except Exception:
+            return ""
+
+    print("Парсинг JSON Либрусека...")
+
+    def process_lit_item(example):
+        return {"text": extract_text(example["book_json"])}
+
+    lit_ds = lit_ds_raw.map(
+        process_lit_item, remove_columns=lit_ds_raw.column_names, num_proc=num_workers
+    )
+
+    # убираем пустые и короткие книжки
+    lit_ds = lit_ds.filter(lambda x: len(x["text"]) > 100, num_proc=num_workers)
+
+    print("Склеиваем датасеты и перемешиваем...")
+    full_ds = concatenate_datasets([wiki_ds, lit_ds])
+    full_ds = full_ds.shuffle(seed=67)
+
     full_ds = full_ds.map(
         chunk_examples,
         batched=True,
@@ -55,20 +109,23 @@ def prepare_dataloaders(
     train_ds = split_data["train"]
     val_ds = split_data["test"]
 
-    def train_text_generator():
-        for item in train_ds:
-            yield item["text"]  # type: ignore
-
+    print("Делаем словарь")
     chars = sorted(list(config.ALLOWED_CHARS))
-    vocab = Vocab(chars, train_text_generator())
 
+    # я задолбался ждать
+    sample_size = min(500_000, len(train_ds))
+    vocab_data = train_ds.select(range(sample_size))
+
+    def vocab_gen():
+        for item in vocab_data:
+            yield item["text"]
+
+    vocab = Vocab(chars, vocab_gen())
     augmenter = TextAugmenter(chars=config.ALLOWED_CHARS)
 
-    my_train_ds = RobustDataset(train_ds, vocab, augmenter)
-    my_val_ds = RobustDataset(val_ds, vocab, augmenter)
-
+    print("Создаем DataLoader'ы...")
     train_loader = DataLoader(
-        my_train_ds,
+        RobustDataset(train_ds, vocab, augmenter),
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
@@ -77,7 +134,7 @@ def prepare_dataloaders(
     )
 
     val_loader = DataLoader(
-        my_val_ds,
+        RobustDataset(val_ds, vocab, augmenter),
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
@@ -85,7 +142,7 @@ def prepare_dataloaders(
         pin_memory=True,
     )
 
-    print(f"Dataset split: Train={len(train_ds)} docs, Val={len(val_ds)} docs")
-    print(f"Vocab size: {len(vocab.word2idx)} words")
+    print(f"Готово! Train: {len(train_ds)} блоков, Val: {len(val_ds)} блоков")
+    print(f"Размер словаря: {len(vocab.word2idx)}")
 
     return train_loader, val_loader, vocab
