@@ -13,3 +13,7 @@ wheels/
 
 # мои веса
 checkpoints/
+wandb/
+main.py
+*.log
+check_word.py
