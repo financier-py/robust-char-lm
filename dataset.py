@@ -60,13 +60,13 @@ class TextAugmenter:
         else:
             j_char = j_char.lower()
         return word[:i] + j_char + word[i + 1 :]
-    
+
     def apply_phonetic_error(self, word: str):
         if len(word) < 2:
             return word
 
         possible_replacements = []
-        
+
         for target, replacements in self.phonetic_rules.items():
             if target in word:
                 for rep in replacements:
@@ -80,6 +80,9 @@ class TextAugmenter:
         return word.replace(target, replacement, 1)
 
     def apply_noise(self, word: str):
+        if len(word) < 2:
+            return word
+
         cur_prob = self.prob * (min(len(word), 10) / 5)
 
         if random.random() > cur_prob:
@@ -92,11 +95,18 @@ class TextAugmenter:
             self.substitute_char,
             self.substitute_neighbor,
             self.apply_phonetic_error,
-            self.apply_phonetic_error
+            self.apply_phonetic_error,
         ]
 
-        strategy = random.choice(strategies)
-        return strategy(word)
+        spoiled = word
+        attempts = 0
+
+        while spoiled == word and attempts < 5:
+            strategy = random.choice(strategies)
+            spoiled = strategy(word)
+            attempts += 1
+
+        return spoiled
 
 
 class Vocab:
@@ -144,6 +154,8 @@ class RobustDataset(Dataset):
         sentence = self.hf_dataset[idx]["text"]
         words = sentence.split()[: config.max_seq_len]
 
+        real_len = len(words)
+
         dirty_words_tensor = []
         clean_words_ids = []
         is_noisy = []
@@ -170,4 +182,5 @@ class RobustDataset(Dataset):
             "x": torch.stack(dirty_words_tensor),
             "y": torch.tensor(clean_words_ids, dtype=torch.long),
             "is_noisy": torch.tensor(is_noisy, dtype=torch.bool),
+            'length': real_len
         }

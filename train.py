@@ -15,14 +15,13 @@ from model import RobustLM
 
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device, "\n")
 
-    # исключительно только для wandb
-    config_dict = {k: v for k, v in config.__dict__.items() if not k.startswith('__')}
-    
+    # исключительно для wandb
+    config_dict = {k: v for k, v in config.__dict__.items() if not k.startswith("__")}
+
     wandb.init(
-        project="robust-lm-spelling", 
-        name="char-cnn-lstm-run1",
-        config=config_dict
+        project="robust-lm-spelling", name="char-cnn-lstm-run1", config=config_dict
     )
 
     print("готовится датасет")
@@ -39,7 +38,7 @@ def train():
     with open(vocab_path, "wb") as f:
         pickle.dump(vocab, f)
     wandb.save(vocab_path, base_path=".")
-    print(f'Словарь сохранен в {vocab_path}')
+    print(f"Словарь сохранен в {vocab_path}")
 
     char_vocab_size = len(vocab.char2idx)
     word_vocab_size = len(vocab.word2idx)
@@ -54,6 +53,9 @@ def train():
 
     criterion = nn.CrossEntropyLoss(ignore_index=0, label_smoothing=0.1)
 
+    # ====== Инициализация AMP Scaler ======
+    # scaler = torch.amp.GradScaler(device.type, enabled=(device.type == 'cuda'))
+
     best_val_loss = float("inf")
 
     for epoch in range(1, config.epochs + 1):
@@ -64,23 +66,44 @@ def train():
         for batch in train_pbar:
             x = batch["x"].to(device)  # [Batch, SeqLen, WordLen]
             y = batch["y"].to(device)  # [Batch, SeqLen]
+            lengths = batch['length']
 
             optimizer.zero_grad()
-            logits = model(x)  # [Batch, SeqLen, VocabSize]
 
-            # [Batch, Seq, VocabSize] -> [Batch * Seq, VocabSize]
-            logits_flat = logits.view(-1, word_vocab_size)
-            # [Batch, Seq] -> [Batch * Seq]
-            y_flat = y.view(-1)
+            # ====== AMP Autocast ======
+            # Форвард пасс делаем в смешанной точности
+            # у меня rtx3060 поэтому bfloat16
+            with torch.autocast(
+                device_type=device.type,
+                dtype=torch.bfloat16,
+                enabled=(device.type == "cuda"),
+            ):
+                logits = model(x, lengths)  # [Batch, SeqLen, VocabSize]
 
-            loss = criterion(logits_flat, y_flat)
+                # [Batch, Seq, VocabSize] -> [Batch * Seq, VocabSize]
+                logits_flat = logits.view(-1, word_vocab_size)
+                # [Batch, Seq] -> [Batch * Seq]
+                y_flat = y.view(-1)
+                # спецом делаем спец. символ UNK под PAD чтоб крос энтропия не наказывала за него
+                y_flat[y_flat == 1] = 0 
+                loss = criterion(logits_flat, y_flat)
+
+            # ====== AMP Backward ======
+            # Скейлим лосс и делаем backward
+            # scaler.scale(loss).backward()
+
+            # Перед клиппингом градиентов их нужно "рас-скейлить" обратно
+            # scaler.unscale_(optimizer)
+
             loss.backward()
-
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=config.grad_norm
             )
+            criterion.step()
 
-            optimizer.step()
+            # Шаг оптимизатора через скейлер и обновление самого скейлера
+            # scaler.step(optimizer)
+            # scaler.update()
 
             train_loss += loss.item()
             train_pbar.set_postfix({"loss": f"{loss.item():.4f}"})
@@ -104,20 +127,27 @@ def train():
                 x = batch["x"].to(device)
                 y = batch["y"].to(device)
                 is_noisy = batch["is_noisy"].to(device)
+                lengths = batch['length']
 
-                logits = model(x)
-                logits_flat = logits.view(-1, word_vocab_size)
-                y_flat = y.view(-1)
-                is_noisy_flat = is_noisy.view(-1)
+                # ====== AMP в валидации (просто для ускорения) ======
+                with torch.autocast(
+                    device_type=device.type,
+                    dtype=torch.bfloat16,
+                    enabled=(device.type == "cuda"),
+                ):
+                    logits = model(x, lengths)
+                    logits_flat = logits.view(-1, word_vocab_size)
+                    y_flat = y.view(-1)
+                    loss = criterion(logits_flat, y_flat)
 
-                loss = criterion(logits_flat, y_flat)
                 val_loss += loss.item()
 
+                is_noisy_flat = is_noisy.view(-1)
                 preds = torch.argmax(logits_flat, dim=1)
 
                 # тут убираем падинг и неизв. слова
                 valid_mask = (y_flat != 0) & (y_flat != 1)
-                
+
                 # маска для слов где была опечятка
                 mask_noisy = valid_mask & is_noisy_flat
 
@@ -126,12 +156,16 @@ def train():
 
                 # True positive, сколько опечаток исправили
                 if mask_noisy.sum() > 0:
-                    correct_fixes += (preds[mask_noisy] == y_flat[mask_noisy]).sum().item()
+                    correct_fixes += (
+                        (preds[mask_noisy] == y_flat[mask_noisy]).sum().item()
+                    )
                     total_noisy += mask_noisy.sum().item()
-                
+
                 # False positive, сколько слов испортили
                 if mask_clean.sum() > 0:
-                    wrong_changes += (preds[mask_clean] != y_flat[mask_clean]).sum().item()
+                    wrong_changes += (
+                        (preds[mask_clean] != y_flat[mask_clean]).sum().item()
+                    )
                     total_clean += mask_clean.sum().item()
 
         avg_val_loss = val_loss / len(val_loader)
@@ -148,21 +182,24 @@ def train():
             f"Испорчено слов: {break_rate:.2%}"
         )
 
-        wandb.log({
-            "epoch": epoch,
-            "train_loss": avg_train_loss,
-            "val_loss": avg_val_loss,
-            "nice_fixes": fix_accuracy,
-            "spoiled words": break_rate,
-            "lr": optimizer.param_groups[0]['lr']
-        })
+        wandb.log(
+            {
+                "epoch": epoch,
+                "train_loss": avg_train_loss,
+                "val_loss": avg_val_loss,
+                "nice_fixes": fix_accuracy,
+                "spoiled words": break_rate,
+                "lr": optimizer.param_groups[0]["lr"],
+            }
+        )
 
         # ====== Тут сохраняем веса ======
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            weights_path = 'checkpoints/best_model.pt'
+            weights_path = "checkpoints/best_model.pt"
             torch.save(model.state_dict(), weights_path)
             wandb.save(weights_path, base_path=".")
+
     wandb.finish()
 
 

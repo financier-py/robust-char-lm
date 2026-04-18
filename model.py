@@ -107,22 +107,19 @@ class RobustLM(nn.Module):
             num_layers=config.lstm_layers,
             batch_first=True,
             dropout=config.dropout if config.lstm_layers > 1 else 0,
-            bidirectional=True # новвоведение
+            bidirectional=True,  # новвоведение
         )
 
         self.dropout = nn.Dropout(p=config.dropout)
         self.classificator = nn.Linear(config.lstm_hidden * 2, word_vocab_size)
 
-    def forward(self, x: torch.Tensor):
-
-        seq_lengths = (x.sum(dim=-1) > 0).sum(dim=-1).cpu().clamp(min=1)
-
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor):
         embed = self.char_cnn(x)
         embed = self.highway(embed)
         embed = self.dropout(embed)
 
         packed_embed = pack_padded_sequence(
-            embed, seq_lengths, batch_first=True, enforce_sorted=False
+            embed, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
 
         packed_lstm_out, _ = self.lstm(packed_embed)
