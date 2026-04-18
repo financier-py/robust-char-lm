@@ -9,20 +9,19 @@ class Config:
     max_word_len: int = 20
     max_seq_len: int = 128
 
-    max_words: int = 100_000
+    max_words: int = 40_000
+    batch_size: int = 64
 
-    char_emb_dim: int = 128
-    cnn_filters: int = 512
-    lstm_hidden: int = 512
+    char_emb_dim: int = 64
+    cnn_filters: int = 128
+    lstm_hidden: int = 256
     lstm_layers: int = 2
-    dropout: float = 0.4
+    dropout: float = 0.3
 
     lr: float = 1e-3
     epochs: int = 30
-    batch_size: int = 32
     grad_norm: float = 4.0
-
-    wiki_limit: int = 30_000
+    wiki_limit: int = 90_000
 
     ALLOWED_CHARS = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя0."
     neigbours = {

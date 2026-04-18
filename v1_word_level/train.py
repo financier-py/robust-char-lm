@@ -99,7 +99,7 @@ def train():
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=config.grad_norm
             )
-            criterion.step()
+            optimizer.step()
 
             # Шаг оптимизатора через скейлер и обновление самого скейлера
             # scaler.step(optimizer)
