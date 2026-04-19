@@ -55,7 +55,7 @@ def load_wiki_dataset(limit: int):
 def extract_json(doc_json: str) -> str:
     """Парсим JSON книги и достаем оттуда текст"""
     try:
-        doc = json.load(doc_json)
+        doc = json.loads(doc_json)
         res = []
         for body in doc:
             if "sections" in body:
