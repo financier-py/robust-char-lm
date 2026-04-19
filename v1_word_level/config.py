@@ -22,6 +22,9 @@ class Config:
     epochs: int = 30
     grad_norm: float = 4.0
     wiki_limit: int = 90_000
+    limit_ds_vocab: int = 500_000
+
+    seed: int = 67
 
     ALLOWED_CHARS = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя0."
     neigbours = {

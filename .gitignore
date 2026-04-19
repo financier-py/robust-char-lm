@@ -15,5 +15,6 @@ wheels/
 checkpoints/
 wandb/
 main.py
+inference.py
 *.log
 check_word.py
